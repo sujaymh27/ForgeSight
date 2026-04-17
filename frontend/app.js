@@ -7,10 +7,27 @@ const SENSOR_RANGES = {
     current_A: { min: 0, max: 30, unit: 'A', label: 'Current' },
 };
 const SENSOR_FIELDS = ['temperature_C', 'vibration_mm_s', 'rpm', 'current_A'];
+const MAX_HISTORY = 36;
 
 const machineState = {};
 MACHINE_IDS.forEach(mid => {
-    machineState[mid] = { riskScore: 0, status: 'running', readings: {}, baselines: {}, anomalies: {}, dataGap: false, anomalyType: 'none', suppressed: 0 };
+    machineState[mid] = {
+        riskScore: 0,
+        status: 'running',
+        readings: {},
+        baselines: {},
+        anomalies: {},
+        dataGap: false,
+        anomalyType: 'none',
+        suppressed: 0,
+        history: {
+            risk: [],
+            temperature_C: [],
+            vibration_mm_s: [],
+            rpm: [],
+            current_A: [],
+        },
+    };
 });
 
 let alerts = [];
@@ -42,6 +59,12 @@ function initMachineCards() {
                     <span id="risk-class-${mid}">Normal</span>
                 </div>
             </div>
+            <div class="graph-card">
+                <div class="spark-wrap">
+                    <div class="spark-label">Risk trend</div>
+                    <svg class="spark-canvas" id="spark-${mid}" viewBox="0 0 180 42" preserveAspectRatio="none"></svg>
+                </div>
+            </div>
             <div id="atype-${mid}" class="anomaly-type-badge at-none"></div>
             <div class="sensor-rows" id="sensors-${mid}">
                 ${SENSOR_FIELDS.map(f => `
@@ -55,7 +78,7 @@ function initMachineCards() {
                     </div>
                 `).join('')}
             </div>
-            <div class="data-gap-overlay" id="gap-${mid}" style="display:none;">DATA GAP — NO SIGNAL</div>
+            <div class="data-gap-overlay" id="gap-${mid}">DATA GAP — NO SIGNAL</div>
         `;
         grid.appendChild(card);
     });
@@ -64,6 +87,66 @@ function initMachineCards() {
 function riskClass(score) { return score > 75 ? 'critical' : score > 50 ? 'high' : score > 25 ? 'medium' : score > 10 ? 'low' : 'normal'; }
 function riskLabel(cls) { return { normal: 'Normal', low: 'Low', medium: 'Moderate', high: 'High', critical: 'Critical' }[cls] || 'Normal'; }
 function riskColor(cls) { return { normal: 'var(--green)', low: 'var(--green)', medium: 'var(--yellow)', high: 'var(--orange)', critical: 'var(--red)' }[cls] || 'var(--green)'; }
+
+function normalizeHistory(values, height) {
+    if (!values.length) return '';
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const span = max - min || 1;
+    return values.map((value, index) => {
+        const x = (index / Math.max(1, values.length - 1)) * 100;
+        const y = height - ((value - min) / span) * height;
+        return `${x},${y}`;
+    }).join(' ');
+}
+
+function updateSparkline(mid) {
+    const svg = document.getElementById(`spark-${mid}`);
+    const history = machineState[mid].history.risk;
+    if (!svg) return;
+    svg.innerHTML = '';
+    if (history.length < 2) {
+        const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        line.setAttribute('x1', '5'); line.setAttribute('y1', '21');
+        line.setAttribute('x2', '175'); line.setAttribute('y2', '21');
+        line.setAttribute('stroke', 'rgba(90,106,132,0.45)'); line.setAttribute('stroke-width', '1');
+        svg.appendChild(line);
+        return;
+    }
+
+    const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+    polyline.setAttribute('points', normalizeHistory(history, 38));
+    polyline.setAttribute('fill', 'none');
+    polyline.setAttribute('stroke', 'rgba(0,245,196,0.95)');
+    polyline.setAttribute('stroke-width', '2');
+    polyline.setAttribute('stroke-linecap', 'round');
+    polyline.setAttribute('stroke-linejoin', 'round');
+    svg.appendChild(polyline);
+
+    const area = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    const points = history.map((value, index) => {
+        const x = (index / Math.max(1, history.length - 1)) * 180;
+        const y = 42 - ((value - Math.min(...history)) / (Math.max(...history) - Math.min(...history) || 1)) * 38;
+        return `${x},${y}`;
+    }).join(' L ');
+    area.setAttribute('d', `M 0 42 L ${points} L 180 42 Z`);
+    area.setAttribute('fill', 'rgba(0,245,196,0.12)');
+    svg.insertBefore(area, polyline);
+}
+
+function appendHistory(mid) {
+    const st = machineState[mid];
+    if (!st) return;
+    st.history.risk.push(st.riskScore);
+    if (st.history.risk.length > MAX_HISTORY) st.history.risk.shift();
+    SENSOR_FIELDS.forEach(field => {
+        const value = st.readings[field];
+        if (value != null) {
+            st.history[field].push(value);
+            if (st.history[field].length > MAX_HISTORY) st.history[field].shift();
+        }
+    });
+}
 
 function updateMachineCard(mid) {
     const st = machineState[mid];
@@ -86,10 +169,13 @@ function updateMachineCard(mid) {
 
     // Anomaly Type Badge
     const atypeEl = document.getElementById(`atype-${mid}`);
-    const typeMap = { spike: 'Spike Detected', drift: 'Gradual Drift', compound: 'Compound Anomaly', none: 'None' };
+    const typeMap = { spike: 'Spike Detected', drift: 'Gradual Drift', compound: 'Compound Anomaly', none: 'No anomaly' };
     const classMap = { spike: 'at-spike', drift: 'at-drift', compound: 'at-compound', none: 'at-none' };
-    atypeEl.textContent = typeMap[st.anomalyType] || 'None';
+    atypeEl.textContent = typeMap[st.anomalyType] || 'No anomaly';
     atypeEl.className = `anomaly-type-badge ${classMap[st.anomalyType] || 'at-none'}`;
+
+    appendHistory(mid);
+    updateSparkline(mid);
 
     SENSOR_FIELDS.forEach(f => {
         const range = SENSOR_RANGES[f];
