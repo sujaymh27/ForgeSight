@@ -1,9 +1,9 @@
-const MACHINE_IDS = ['M-001', 'M-002', 'M-003', 'M-004'];
-const MACHINE_NAMES = { 'M-001': 'Pump-Alpha', 'M-002': 'Compressor-Beta', 'M-003': 'Motor-Gamma', 'M-004': 'Conveyor-Delta' };
+const MACHINE_IDS = ['CNC_01', 'CNC_02', 'PUMP_03', 'CONVEYOR_04'];
+const MACHINE_NAMES = { 'CNC_01': 'CNC Machine #1', 'CNC_02': 'CNC Machine #2', 'PUMP_03': 'Pump #3', 'CONVEYOR_04': 'Conveyor #4' };
 const SENSOR_RANGES = {
     temperature_C: { min: 0, max: 120, unit: '°C', label: 'Temp' },
     vibration_mm_s: { min: 0, max: 18, unit: 'mm/s', label: 'Vibration' },
-    rpm: { min: 0, max: 2200, unit: 'RPM', label: 'RPM' },
+    rpm: { min: 0, max: 3500, unit: 'RPM', label: 'RPM' },
     current_A: { min: 0, max: 30, unit: 'A', label: 'Current' },
 };
 const SENSOR_FIELDS = ['temperature_C', 'vibration_mm_s', 'rpm', 'current_A'];
